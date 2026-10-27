@@ -8,12 +8,12 @@ Usage: sudo bash deploy.sh [install|start|stop|status|check|destroy]
   install  Verify/download the ISO, install the Vagrantfile, and start (default).
   start    Start the installed VM and wait for HTTP and SSH.
   stop     Power off the live CD (changes in guest RAM are lost).
-  status   Show Vagrant status.
+  status   Show the actual libvirt domain state.
   check    Wait up to two minutes for HTTP and an SSH banner.
   destroy  Remove this VM after Vagrant's confirmation; retain the ISO.
 
 Run on the course Kali host. Requires Bash, curl, sha256sum, flock, timeout,
-Vagrant and the vagrant-libvirt plugin. State and ISO are kept in:
+virsh, Vagrant and the vagrant-libvirt plugin. State and ISO are kept in:
   /var/lib/libvirt/vagrant-boxes/lab-de-ice-s1-100
 Target: http://192.168.1.100/ (access from the Kali host).
 EOF
@@ -51,7 +51,7 @@ ready() {
   return 1
 }
 
-for tool in curl sha256sum flock timeout vagrant; do
+for tool in curl sha256sum flock timeout vagrant virsh; do
   command -v "$tool" >/dev/null || { echo "Missing prerequisite: $tool" >&2; exit 1; }
 done
 if [[ $action == check ]]; then ready; exit; fi
@@ -64,6 +64,30 @@ exec 9>"$runtime/.deploy.lock"
 flock -n 9 || { echo 'Another deployment is running.' >&2; exit 1; }
 export VAGRANT_DEFAULT_PROVIDER=libvirt
 export LIBVIRT_DEFAULT_URI=qemu:///system
+
+# vagrant-libvirt calls a running static-IP guest "inaccessible" without a
+# DHCP lease. Read its recorded UUID, then use libvirt for power and status.
+domain_id() {
+  local id_file="$runtime/.vagrant/machines/default/libvirt/id"
+  [[ -r $id_file ]] || return 1
+  local uuid
+  uuid=$(cat "$id_file")
+  [[ $uuid =~ ^[[:xdigit:]]{8}-[[:xdigit:]]{4}-[[:xdigit:]]{4}-[[:xdigit:]]{4}-[[:xdigit:]]{12}$ ]] || return 1
+  virsh -c qemu:///system dominfo "$uuid" >/dev/null 2>&1 || return 1
+  printf '%s\n' "$uuid"
+}
+
+start() {
+  local uuid state
+  uuid=$(domain_id) || { echo 'VM is not installed. Run install first.' >&2; return 1; }
+  state=$(LC_ALL=C virsh -c qemu:///system domstate "$uuid")
+  case "$state" in
+    running) ;;
+    'shut off') virsh -c qemu:///system start "$uuid" ;;
+    *) echo "VM state is '$state'; inspect its console before starting." >&2; return 1 ;;
+  esac
+  ready
+}
 
 if [[ $action == install ]]; then
   [[ -r $source_dir/Vagrantfile ]] || { echo 'Keep deploy.sh beside its Vagrantfile.' >&2; exit 1; }
@@ -88,8 +112,20 @@ fi
 [[ -f $runtime/Vagrantfile ]] || { echo 'Run install first.' >&2; exit 1; }
 cd -- "$runtime"
 case "$action" in
-  install|start) vagrant up --provider=libvirt; ready ;;
-  stop) vagrant halt --force ;;
-  status) vagrant status ;;
+  install)
+    if ! domain_id >/dev/null; then vagrant up --provider=libvirt; fi
+    start ;;
+  start) start ;;
+  stop)
+    uuid=$(domain_id) || { echo 'VM is not installed.' >&2; exit 1; }
+    if [[ $(LC_ALL=C virsh -c qemu:///system domstate "$uuid") != 'shut off' ]]; then
+      virsh -c qemu:///system destroy "$uuid"
+    fi ;;
+  status)
+    if uuid=$(domain_id); then
+      virsh -c qemu:///system dominfo "$uuid"
+    else
+      echo 'VM is not installed.'
+    fi ;;
   destroy) vagrant destroy ;;
 esac

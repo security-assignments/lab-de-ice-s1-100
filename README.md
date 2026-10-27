@@ -46,18 +46,20 @@ sudo bash deploy.sh destroy
 
 **Stopping or destroying this live-CD VM loses changes in guest RAM.** Starting
 again boots the original challenge. `destroy` asks for confirmation and retains
-the ISO and shared network. Repeating `install` verifies and reuses the ISO and
+the ISO. Other lab networks are left alone. Repeating `install` verifies and reuses the ISO and
 existing VM. To update the launcher, run `git pull --ff-only`, then repeat
 `sudo bash deploy.sh install`; stop/destroy a VM before applying changes to its
 hardware configuration.
 
 ## Instructor prerequisites and troubleshooting
 
-Bash and Vagrant/libvirt are sufficient; Ansible is not needed. Use the course
+Bash, Vagrant and libvirt (`virsh`) are sufficient; Ansible is not needed. Use the course
 Kali image for the supported environment. Other Linux hosts need working KVM,
 libvirt's system connection and default storage pool, Bash, curl, coreutils,
 util-linux (`flock`), Vagrant, and a plugin installed for the user running
-Vagrant. All launcher commands use root consistently:
+Vagrant. The launcher uses Vagrant to create/remove the domain and libvirt directly for
+power controls and status. This avoids Vagrant interpreting the lack of a DHCP
+lease as an inaccessible VM. All launcher commands use root consistently:
 
 ```bash
 sudo vagrant plugin list
