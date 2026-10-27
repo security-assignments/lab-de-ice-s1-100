@@ -1,63 +1,103 @@
-# De-ICE S1.100 on Vagrant-libvirt
+# De-ICE S1.100 on Kali / libvirt
 
-Sets up a libvirt virtual network to enable access to de-ice s1.100 which runs
-on 192.168.1.100/24.
+Run the [De-ICE S1.100 VulnHub challenge](https://www.vulnhub.com/entry/de-ice-s1100,8/)
+on the course Kali host. The target is a 512 MiB, one-vCPU live-CD VM at
+**192.168.1.100**, on a separate `De-ICE` libvirt network. Use it from Kali;
+keep the deliberately vulnerable target on the lab network.
 
+## Deploy
 
-## Using it
-
-* Download the "De-ICE_S1.100.iso" file into this directory, leaving it named
-  exactly that. 
-
-  When I last tried, it wasn't working to download it from the url
-  linked from [vulnhub](https://www.vulnhub.com/entry/de-ice-s1100,8/), so I got a
-  copy from Internet Archive's Wayback Machine and uploaded it to my dropbox
-  account.
-
-  * Wayback Archives link:
-    <https://web.archive.org/web/20190831103512/https://hackingdojo.com/downloads/iso/De-ICE_S1.100.iso>
-  * My dropbox share:
-    <https://www.dropbox.com/s/v6vuy9b86nqr881/De-ICE_S1.100.iso?dl=1>
-
-* Grant global execute privileges to the iso so that user `qemu` can find the iso:
-    
-      sudo chmod a+x De-ICE_S1.100.iso
-
-* Then, run `vagrant up`.
-
-All together:
+On the [course Kali image](https://security-assignments.com/labs/virtual-machines),
+open a terminal and run:
 
 ```bash
-$ git clone https://github.com/deargle/lab-de-ice-s1-100 && cd lab-de-ice-s1-100
-$ wget https://www.dropbox.com/s/v6vuy9b86nqr881/De-ICE_S1.100.iso?dl=1 -O De-ICE_S1.100.iso
-$ chmod a+x De-ICE_S1.100.iso
-$ sudo vagrant up
+git clone https://github.com/security-assignments/lab-de-ice-s1-100.git
+cd lab-de-ice-s1-100
+sudo bash deploy.sh install
 ```
 
+The Bash script installs the Vagrantfile in
+`/var/lib/libvirt/vagrant-boxes/lab-de-ice-s1-100`, verifies the ISO's SHA-256,
+starts the VM, and waits up to two minutes for HTTP and SSH. Current course Kali
+images already cache the ISO there; otherwise it downloads our
+[hosted ISO](https://storage.googleapis.com/security-assignments-vagrant-boxes/lab-isos/De-ICE_S1.100.iso)
+(205,422,592 bytes). No cloud account or download login is needed.
 
-## Enabling legacy ssh KEX
+Open **http://192.168.1.100/** in Kali's browser. In `virt-manager`, use the
+**QEMU/KVM system** connection to see `lab-de-ice-s1-100_default` and its console.
+Vagrant does not log into or provision this challenge VM; `vagrant ssh` is not
+supported. SSH credentials are part of the exercise.
 
-The ssh key exchange algo (kex) that the vm uses is obsolete. You may need
-to edit your ssh client to permit its use.
+The ISO is read-only, mode `0644`; it does **not** need execute permission.
+Placing it under `/var/lib/libvirt` lets QEMU traverse its parent directories,
+including when your home directory is private.
 
-For example, if you get the following error message when you try to ssh:
+## Stop, resume, check, or remove
+
+From your cloned repository:
 
 ```bash
-└─$ ssh 192.168.1.100                                                                  
-Unable to negotiate with 192.168.1.100 port 22: no matching key exchange method found. Their offer: diffie-hellman-group-exchange-sha1,diffie-hellman-group14-sha1,diffie-hellman-group1-sha1
+sudo bash deploy.sh status
+sudo bash deploy.sh check
+sudo bash deploy.sh stop
+sudo bash deploy.sh start
+sudo bash deploy.sh destroy
 ```
 
-Then you could pass the following option in each ssh call:
+**Stopping or destroying this live-CD VM loses changes in guest RAM.** Starting
+again boots the original challenge. `destroy` asks for confirmation and retains
+the ISO and shared network. Repeating `install` verifies and reuses the ISO and
+existing VM. To update the launcher, run `git pull --ff-only`, then repeat
+`sudo bash deploy.sh install`; stop/destroy a VM before applying changes to its
+hardware configuration.
+
+## Instructor prerequisites and troubleshooting
+
+Bash and Vagrant/libvirt are sufficient; Ansible is not needed. Use the course
+Kali image for the supported environment. Other Linux hosts need working KVM,
+libvirt's system connection and default storage pool, Bash, curl, coreutils,
+util-linux (`flock`), Vagrant, and a plugin installed for the user running
+Vagrant. All launcher commands use root consistently:
 
 ```bash
-ssh -oKexAlgorithms=+diffie-hellman-group1-sha1 192.168.1.100
+sudo vagrant plugin list
+# Only if vagrant-libvirt is missing:
+sudo vagrant plugin install vagrant-libvirt
 ```
 
-Or you could add the following to your `~/.ssh/config` file:
+The launcher does not install host packages or change SSH policy. If startup
+fails, inspect the console in `virt-manager` and check for an overlapping
+`192.168.1.0/24` network or another VM using `.100`. On a cloud host, nested
+virtualization must be enabled. A successful `vagrant up` alone does not prove
+the live CD finished booting; use `deploy.sh check`.
 
-```
-Host 192.168.1.100
-    KexAlgorithms +diffie-hellman-group1-sha1
+For a checksum mismatch, remove only the named cached ISO and rerun `install`.
+Downloads use a temporary file and are renamed only after verification.
+The expected SHA-256 is:
+
+```text
+d4d17be52000a6f92a970198a538eb85af54c4fa70a34e3c87ee5819126e3cc6
 ```
 
-Source: <http://www.openssh.com/legacy.html>
+Current course Kali enables compatibility with old SSH targets. On another
+host, if SSH reports negotiation errors, use a target-specific override:
+
+```bash
+ssh -oKexAlgorithms=+diffie-hellman-group1-sha1 -oHostKeyAlgorithms=+ssh-rsa USER@192.168.1.100
+```
+
+Replace `USER` with a username discovered during the exercise. See
+[OpenSSH's legacy guidance](https://www.openssh.com/legacy.html); authentication
+failures after negotiation are separate from SSH algorithm compatibility.
+
+## Maintainers
+
+The ISO mirror is the original live CD recovered from the
+[Wayback Machine](https://web.archive.org/web/20190831103512/https://hackingdojo.com/downloads/iso/De-ICE_S1.100.iso).
+Its bytes and checksum match the copy cached by the Kali image build. Only this
+ISO object is public; publishing it requires no bucket-list permission.
+Do not replace it with different bytes under the same name. An ISO update needs
+a new object path and an explicit checksum update in this repo and the Kali
+image provisioning configuration.
+
+See [validation notes](docs/validation.md) for tested behavior and host versions.

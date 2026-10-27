@@ -1,4 +1,8 @@
 Vagrant.configure("2") do |config|
+  # This is a live CD, with no Vagrant guest account or guest provisioning.
+  config.vm.communicator = "none"
+  config.vm.synced_folder ".", "/vagrant", disabled: true
+
 
   config.vm.network :private_network,
     ip: '192.168.1.100',
@@ -16,7 +20,13 @@ Vagrant.configure("2") do |config|
     autostart: true
 
   config.vm.provider :libvirt do |libvirt|
-    libvirt.storage :file, :device => :cdrom, :path => "#{Dir.pwd}/De-ICE_S1.100.iso"
+    libvirt.uri = "qemu:///system"
+    libvirt.memory = 512
+    libvirt.cpus = 1
+    # Avoid 0.12.x rewriting an auto-expanded CPU model to an empty model on
+    # subsequent starts. This live CD has no persistent guest hardware state.
+    libvirt.cpu_mode = 'host-passthrough'
+    libvirt.storage :file, :device => :cdrom, :path => File.join(__dir__, "De-ICE_S1.100.iso")
     libvirt.boot 'cdrom'
     libvirt.mgmt_attach = false
     # Inert while mgmt_attach is false (this VM never joins the management
